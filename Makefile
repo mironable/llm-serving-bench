@@ -1,5 +1,6 @@
 URL ?=
 SERVER ?= vllm
+WORKLOAD ?= short
 
 deploy-vllm:
 	uv run modal deploy serve/vllm_app.py
@@ -8,7 +9,7 @@ deploy-sglang:
 	uv run modal deploy serve/sglang_app.py
 
 bench:
-	uv run python -m bench.load --base-url $(URL) --server-name $(SERVER) --out results/$(SERVER).parquet
+	uv run python -m bench.load --base-url $(URL) --server-name $(SERVER) --workload $(WORKLOAD) --out results/$(SERVER)-$(WORKLOAD).parquet
 
 report:
 	uv run python -m bench.report results/*.parquet --write-readme

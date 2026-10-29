@@ -10,9 +10,8 @@ import pandas as pd
 README_START = "<!-- results:start -->"
 README_END = "<!-- results:end -->"
 
-COLUMNS = [
-    "server",
-    "concurrency",
+KEY = ["workload", "server", "concurrency"]
+COLUMNS = KEY + [
     "ttft_p50_ms",
     "ttft_p95_ms",
     "itl_mean_ms",
@@ -24,10 +23,13 @@ COLUMNS = [
 
 
 def summarize(df: pd.DataFrame) -> pd.DataFrame:
+    if "workload" not in df.columns:
+        df = df.assign(workload="short")  # runs recorded before workloads existed
     rows = []
-    for _, g in df.groupby(["server", "concurrency"], sort=True):
+    for _, g in df.groupby(KEY, sort=True):
         rows.append(
             {
+                "workload": str(g["workload"].iloc[0]),
                 "server": str(g["server"].iloc[0]),
                 "concurrency": int(g["concurrency"].iloc[0]),
                 "ttft_p50_ms": g["ttft_s"].median() * 1000,
@@ -51,8 +53,8 @@ def to_markdown(summary: pd.DataFrame) -> str:
     sep = "|" + "|".join("---" for _ in COLUMNS) + "|"
     lines = [header, sep]
     for r in summary.to_dict("records"):
-        cells = [str(r["server"]), str(r["concurrency"])]
-        for col in COLUMNS[2:]:
+        cells = [str(r[k]) for k in KEY]
+        for col in COLUMNS[len(KEY) :]:
             v = r[col]
             cells.append("n/a" if _missing(v) else f"{float(v):.1f}")
         lines.append("| " + " | ".join(cells) + " |")
@@ -72,7 +74,10 @@ def main() -> None:
     p.add_argument("parquet", nargs="+")
     p.add_argument("--write-readme", action="store_true")
     args = p.parse_args()
-    df = pd.concat([pd.read_parquet(f) for f in args.parquet], ignore_index=True)
+    frames = [pd.read_parquet(f) for f in args.parquet]
+    df = pd.concat(
+        [f.assign(workload=f.get("workload", "short")) for f in frames], ignore_index=True
+    )
     table = to_markdown(summarize(df))
     print(table)
     if args.write_readme:

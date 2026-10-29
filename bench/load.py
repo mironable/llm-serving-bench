@@ -21,11 +21,52 @@ PROMPTS = [
     "List five failure modes of an LLM serving system under burst traffic.",
 ]
 
+WORKLOADS = ["short", "shared-prefix"]
 
-async def stream_one(client: httpx.AsyncClient, prompt: str, max_tokens: int) -> RequestStats:
+_RULES = [
+    "Answer in the learner's target language first, then give a one-line gloss in English.",
+    "Correct at most two mistakes per reply and explain each with a short example sentence.",
+    "Prefer everyday vocabulary over formal registers unless the learner asks for formality.",
+    "When the learner writes a sentence, echo it back corrected before adding anything new.",
+    "Keep replies under eighty words so the learner reads the whole message on a phone.",
+    "Introduce one new grammar point at a time and reuse it in the next three exchanges.",
+    "Never switch topic yourself; follow the learner's thread even if it is off the lesson.",
+    "If the learner mixes languages, respond entirely in the target language.",
+    "Avoid idioms the learner has not seen in the course unless they ask for slang.",
+    "Praise specific improvements rather than giving generic encouragement.",
+    "When pronunciation comes up, describe mouth position in plain words, not IPA.",
+    "Close every reply with a single short question that invites the next turn.",
+]
+
+_LANGUAGES = ["Spanish", "French", "German", "Italian", "Portuguese", "Dutch", "Swedish", "Polish"]
+
+
+def shared_system_prompt(target_tokens: int = 1500) -> str:
+    """Deterministic ~1500-token system prompt shared by every shared-prefix request."""
+    lines = ["You are a language tutor inside a mobile app. Follow these rules exactly."]
+    i = 0
+    # Roughly 1.3 tokens per word for this kind of English prose.
+    while sum(len(line.split()) for line in lines) * 1.3 < target_tokens:
+        lang = _LANGUAGES[i % len(_LANGUAGES)]
+        rule = _RULES[i % len(_RULES)]
+        lines.append(f"Rule {i + 1} ({lang} track): {rule}")
+        i += 1
+    return "\n".join(lines)
+
+
+def messages_for(workload: str, i: int) -> list[dict[str, str]]:
+    user = {"role": "user", "content": PROMPTS[i % len(PROMPTS)]}
+    if workload == "shared-prefix":
+        return [{"role": "system", "content": shared_system_prompt()}, user]
+    return [user]
+
+
+async def stream_one(
+    client: httpx.AsyncClient, messages: list[dict[str, str]], max_tokens: int
+) -> RequestStats:
     body = {
         "model": "model",
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0,
         "stream": True,
@@ -71,7 +112,12 @@ async def sample_metrics(
 
 
 async def run_level(
-    client: httpx.AsyncClient, server: str, concurrency: int, n_requests: int, max_tokens: int
+    client: httpx.AsyncClient,
+    server: str,
+    workload: str,
+    concurrency: int,
+    n_requests: int,
+    max_tokens: int,
 ) -> list[dict[str, Any]]:
     sem = asyncio.Semaphore(concurrency)
     stop = asyncio.Event()
@@ -80,7 +126,7 @@ async def run_level(
     async def guarded(i: int) -> RequestStats | None:
         async with sem:
             try:
-                return await stream_one(client, PROMPTS[i % len(PROMPTS)], max_tokens)
+                return await stream_one(client, messages_for(workload, i), max_tokens)
             except (httpx.HTTPError, ValueError) as exc:
                 # Dropped streams are a property of the system under test; count, don't abort.
                 print(f"  request {i} failed: {type(exc).__name__}: {exc}")
@@ -95,6 +141,7 @@ async def run_level(
     return [
         {
             "server": server,
+            "workload": workload,
             "concurrency": concurrency,
             "request_idx": i,
             "ttft_s": s.ttft_s,
@@ -113,11 +160,13 @@ async def run_level(
 async def main_async(args: argparse.Namespace) -> None:
     rows: list[dict[str, Any]] = []
     async with httpx.AsyncClient(base_url=args.base_url, timeout=args.timeout) as client:
-        await stream_one(client, PROMPTS[0], 16)  # warm up
+        await stream_one(client, messages_for(args.workload, 0), 16)  # warm up
         for c in args.concurrency:
             # At least two full waves, otherwise high levels never reach their concurrency.
             n_requests = max(args.requests_per_level, 2 * c)
-            level = await run_level(client, args.server_name, c, n_requests, args.max_tokens)
+            level = await run_level(
+                client, args.server_name, args.workload, c, n_requests, args.max_tokens
+            )
             rows.extend(level)
             if not level:
                 print(f"{args.server_name} c={c:>3} every request failed")
@@ -125,7 +174,8 @@ async def main_async(args: argparse.Namespace) -> None:
             df = pd.DataFrame(level)
             tput = df["tokens"].sum() / df["level_wall_s"].iloc[0]
             print(
-                f"{args.server_name} c={c:>3} ttft_p50={df['ttft_s'].median() * 1000:.0f}ms "
+                f"{args.server_name} {args.workload} c={c:>3} "
+                f"ttft_p50={df['ttft_s'].median() * 1000:.0f}ms "
                 f"itl={df['itl_mean_s'].mean() * 1000:.1f}ms tput={tput:.0f} tok/s "
                 f"errors={df['level_errors'].iloc[0]}"
             )
@@ -139,6 +189,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base-url", required=True)
     p.add_argument("--server-name", required=True, choices=["vllm", "sglang"])
+    p.add_argument("--workload", choices=WORKLOADS, default="short")
     p.add_argument(
         "--concurrency", type=lambda s: [int(x) for x in s.split(",")], default=[1, 4, 16, 64, 128]
     )
