@@ -4,6 +4,8 @@ Serves Qwen2.5-7B-Instruct with vLLM and with SGLang on Modal, then measures wha
 
 Latency is measured client-side from the streamed response, so the numbers are what a caller sees. Queue depth and KV usage come from each server's Prometheus `/metrics` endpoint, sampled during each concurrency level.
 
+[docs/architecture.md](docs/architecture.md) walks through the request pipeline, shows where each metric is measured, and explains why these two servers are the ones worth comparing.
+
 ## Results
 
 <!-- results:start -->
