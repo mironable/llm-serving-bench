@@ -82,7 +82,16 @@ Quantisation changes ITL without changing hardware: int8 or fp8 weights halve th
 
 First decision: managed API or self-hosted. Managed (Bedrock, OpenAI) means no engine, no capacity planning, pay per token, no control over latency under load. Self-hosted wins when token volume makes per-token pricing expensive, when a fine-tuned or domain model is needed, when p95 latency must be controlled, or when data residency rules out the managed API.
 
-Self-hosted on AWS mirrors a speech endpoint: weights in S3 with the same promotion pipeline, a BYOC image built from the official engine image and pinned in ECR, a SageMaker real-time endpoint on g5 or g6 instances defined in CloudFormation, autoscaling keyed on concurrent requests per instance rather than CPU, the engine's `/metrics` scraped into CloudWatch with alarms on queue depth and KV usage.
+Self-hosted on AWS looks the same as hosting any other GPU model, for example a speech recognition model behind a SageMaker endpoint. The pieces, in the order a request meets them:
+
+1. Model artifact. The weights live in an S3 bucket as versioned files. A new model version is uploaded to a staging bucket first, tested, then copied to production. Nothing in the serving stack holds weights itself; the container downloads them at start-up.
+2. Container image. A Docker image built from the engine's official image, with the serve command and the model location baked in. It is pushed to ECR, AWS's container registry, and pinned by tag so a deploy always refers to one exact image.
+3. Endpoint. A SageMaker real-time endpoint is a managed HTTPS service that runs that image on GPU instances you choose, for example g5 for A10G or g6e for L40S. SageMaker starts the container, health-checks it, routes requests to it, and replaces instances that fail. The endpoint, its instance type and count, and its autoscaling policy are declared in CloudFormation so the whole thing is reproducible and reviewable as code.
+4. Autoscaling. For CPU services you scale on CPU utilisation. For an LLM endpoint that signal is useless because the GPU is busy long before the CPU is. The scaling metric is concurrent requests per instance, with the target set from the knee measured in a benchmark like this one.
+5. Observability. The engine's `/metrics` endpoint is scraped into CloudWatch. Alarms go on queue depth (requests are waiting, add capacity), KV usage (the memory pool is nearly full, the next thing that happens is queueing) and p95 TTFT (what users feel). SageMaker adds its own ModelLatency and OverheadLatency metrics for free.
+6. Client. A service or Lambda calls the endpoint with the OpenAI-style request, streams the response back to the user, and sits behind an API gateway that handles authentication and rate limiting.
+
+The point of the comparison to a speech endpoint is that none of these six pieces is specific to LLMs. A team that already runs one GPU model on SageMaker has the pipeline, the IaC, the registry and the alarms; the LLM only changes which image goes in step 2 and which metrics matter in step 5.
 
 Second decision: capacity. The benchmark in this repo is the capacity planning exercise. The knee per engine sets the autoscaling target and the instance count for a traffic forecast.
 
