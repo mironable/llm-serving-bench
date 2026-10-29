@@ -19,6 +19,7 @@ COLUMNS = [
     "throughput_tok_s",
     "queue_depth",
     "kv_usage",
+    "errors",
 ]
 
 
@@ -35,6 +36,7 @@ def summarize(df: pd.DataFrame) -> pd.DataFrame:
                 "throughput_tok_s": g["tokens"].sum() / g["level_wall_s"].iloc[0],
                 "queue_depth": g["queue_depth"].iloc[0],
                 "kv_usage": g["kv_usage"].iloc[0],
+                "errors": int(g["level_errors"].iloc[0]),
             }
         )
     return pd.DataFrame(rows, columns=COLUMNS)

@@ -77,15 +77,21 @@ async def run_level(
     stop = asyncio.Event()
     sampler = asyncio.create_task(sample_metrics(client, server, stop))
 
-    async def guarded(i: int) -> RequestStats:
+    async def guarded(i: int) -> RequestStats | None:
         async with sem:
-            return await stream_one(client, PROMPTS[i % len(PROMPTS)], max_tokens)
+            try:
+                return await stream_one(client, PROMPTS[i % len(PROMPTS)], max_tokens)
+            except (httpx.HTTPError, ValueError) as exc:
+                # Dropped streams are a property of the system under test; count, don't abort.
+                print(f"  request {i} failed: {type(exc).__name__}: {exc}")
+                return None
 
     wall_start = time.perf_counter()
     stats = await asyncio.gather(*(guarded(i) for i in range(n_requests)))
     wall = time.perf_counter() - wall_start
     stop.set()
     gauges = await sampler
+    errors = sum(s is None for s in stats)
     return [
         {
             "server": server,
@@ -96,9 +102,11 @@ async def run_level(
             "tokens": s.tokens,
             "total_s": s.total_s,
             "level_wall_s": wall,
+            "level_errors": errors,
             **gauges,
         }
         for i, s in enumerate(stats)
+        if s is not None
     ]
 
 
@@ -107,15 +115,19 @@ async def main_async(args: argparse.Namespace) -> None:
     async with httpx.AsyncClient(base_url=args.base_url, timeout=args.timeout) as client:
         await stream_one(client, PROMPTS[0], 16)  # warm up
         for c in args.concurrency:
-            level = await run_level(
-                client, args.server_name, c, args.requests_per_level, args.max_tokens
-            )
+            # At least two full waves, otherwise high levels never reach their concurrency.
+            n_requests = max(args.requests_per_level, 2 * c)
+            level = await run_level(client, args.server_name, c, n_requests, args.max_tokens)
             rows.extend(level)
+            if not level:
+                print(f"{args.server_name} c={c:>3} every request failed")
+                continue
             df = pd.DataFrame(level)
             tput = df["tokens"].sum() / df["level_wall_s"].iloc[0]
             print(
                 f"{args.server_name} c={c:>3} ttft_p50={df['ttft_s'].median() * 1000:.0f}ms "
-                f"itl={df['itl_mean_s'].mean() * 1000:.1f}ms tput={tput:.0f} tok/s"
+                f"itl={df['itl_mean_s'].mean() * 1000:.1f}ms tput={tput:.0f} tok/s "
+                f"errors={df['level_errors'].iloc[0]}"
             )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -128,7 +140,7 @@ def main() -> None:
     p.add_argument("--base-url", required=True)
     p.add_argument("--server-name", required=True, choices=["vllm", "sglang"])
     p.add_argument(
-        "--concurrency", type=lambda s: [int(x) for x in s.split(",")], default=[1, 4, 16, 64]
+        "--concurrency", type=lambda s: [int(x) for x in s.split(",")], default=[1, 4, 16, 64, 128]
     )
     p.add_argument("--requests-per-level", type=int, default=32)
     p.add_argument("--max-tokens", type=int, default=256)

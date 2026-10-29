@@ -11,8 +11,11 @@ PORT = 8000
 MINUTES = 60
 
 volume = modal.Volume.from_name("llm-serving-bench-models", create_if_missing=True)
+# flashinfer JIT-compiles sampling kernels at first use, so nvcc must be in the image.
+# Torch 2.13 on PyPI is a CUDA 13 build; Modal hosts expose CUDA driver 13.3.
 image = (
-    modal.Image.debian_slim(python_version="3.12")
+    modal.Image.from_registry("nvidia/cuda:13.0.3-devel-ubuntu22.04", add_python="3.12")
+    .entrypoint([])
     .pip_install("vllm==0.32.0", "huggingface_hub[hf_transfer]")
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1", "HF_HOME": "/models"})
 )

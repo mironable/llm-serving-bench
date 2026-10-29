@@ -11,8 +11,10 @@ PORT = 8000
 MINUTES = 60
 
 volume = modal.Volume.from_name("llm-serving-bench-models", create_if_missing=True)
+# Same reason as the vLLM app: flashinfer JIT needs nvcc, and the torch pin is a CUDA 13 build.
 image = (
-    modal.Image.debian_slim(python_version="3.12")
+    modal.Image.from_registry("nvidia/cuda:13.0.3-devel-ubuntu22.04", add_python="3.12")
+    .entrypoint([])
     .pip_install("sglang[all]==0.5.22", "huggingface_hub[hf_transfer]")
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1", "HF_HOME": "/models"})
 )

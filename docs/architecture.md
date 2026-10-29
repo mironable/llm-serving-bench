@@ -66,7 +66,7 @@ Latency is measured on the client on purpose. Server-side histograms exclude Mod
 ```mermaid
 flowchart LR
     subgraph local["Laptop"]
-        LG["bench/load.py<br/>concurrency sweep 1, 4, 16, 64"]
+        LG["bench/load.py<br/>concurrency sweep 1, 4, 16, 64, 128"]
         RP["bench/report.py"]
         PQ[("results/*.parquet")]
         RM["README results table"]
@@ -85,7 +85,7 @@ flowchart LR
     LG --> PQ --> RP --> RM
 ```
 
-Each server runs in its own Modal app on an identical GPU and reads the same cached weights. The two benchmark runs are sequential, so they never share a GPU. Modal's `scaledown_window` keeps the container warm between concurrency levels, which avoids cold starts polluting TTFT.
+Each server runs in its own Modal app on an identical GPU and reads the same cached weights. Each server runs on its own GPU, so the two sweeps never contend for one. Modal's `scaledown_window` keeps the container warm between concurrency levels, which avoids cold starts polluting TTFT.
 
 ## Why vLLM and SGLang
 
@@ -107,9 +107,10 @@ The practical consequence: SGLang should win when many requests share a long pre
 
 ## Choosing a server
 
-To be filled in from the results table once both runs have completed. Each recommendation below will cite a row in the README.
+Each point cites rows of the results table in the [README](../README.md). The sweep ran both servers with defaults, so these are out-of-the-box recommendations and the tuning caveat applies throughout.
 
-- Many short chats with a shared system prompt: pending
-- Long-context single user: pending
-- JSON-constrained output: pending
-- Highest throughput at the cost of ITL: pending
+- **Highest throughput per GPU.** vLLM, 1594 tok/s at 64 streams against SGLang's 1101, and 1775 against 1126 at 128. The gap is mostly SGLang's default memory fraction capping its KV pool near 45 running requests. Raise `--mem-fraction-static` before concluding anything about the engines themselves.
+- **Latency-sensitive, low concurrency.** vLLM. At 1 to 16 streams both decode at the same 32 to 34 ms ITL, but vLLM's median TTFT is 150 to 300 ms lower at every level, and that gap exists with an empty queue so it is not a capacity effect.
+- **Sizing a single A10G for a 7B model.** Plan for about 64 concurrent streams on vLLM before TTFT degrades, and about 45 on SGLang at defaults. Above the knee, vLLM degrades through prefill contention with zero queueing and SGLang degrades through queueing, which is the better failure mode to alarm on since queue depth is an explicit gauge.
+- **Many short chats with a shared system prompt.** Not decided by this sweep. The five prompts share only the chat template, so radix-tree prefix caching never got a workload. This is the experiment where SGLang's design should pay off and it is the one to run next.
+- **JSON-constrained output.** Not measured. Both support it; SGLang treats it as a core path, vLLM via guided decoding backends. Needs its own sweep with a grammar.

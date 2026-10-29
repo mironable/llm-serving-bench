@@ -17,6 +17,7 @@ def _frame() -> pd.DataFrame:
                 "tokens": 100,
                 "total_s": 2.0,
                 "level_wall_s": 8.0,
+                "level_errors": 2,
                 "queue_depth": 1.5,
                 "kv_usage": None,
             }
@@ -33,13 +34,14 @@ def test_summary_metrics():
     assert row["throughput_tok_s"] == pytest.approx(400 / 8)
     assert row["queue_depth"] == 1.5
     assert pd.isna(row["kv_usage"])
+    assert row["errors"] == 2
 
 
 def test_markdown_table_handles_missing_values():
     table = to_markdown(summarize(_frame()))
     assert table.splitlines()[0].startswith("| server | concurrency |")
     assert "| vllm | 4 | 250.0 |" in table
-    assert table.rstrip().endswith("n/a |")
+    assert table.rstrip().endswith("| n/a | 2.0 |")
 
 
 def test_splice_readme_replaces_between_markers():
