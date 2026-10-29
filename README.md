@@ -1,6 +1,6 @@
 # llm-serving-bench
 
-Serves Qwen2.5-7B-Instruct with vLLM and with SGLang on Modal, then measures what matters for a serving system under load: time to first token, inter-token latency, throughput, queue depth and KV-cache usage.
+Serves Qwen2.5-7B-Instruct with vLLM and with SGLang on Modal, plus Qwen3-8B on vLLM for the reasoning experiment, then measures what matters for a serving system under load: time to first token, inter-token latency, throughput, queue depth and KV-cache usage.
 
 Latency is measured client-side from the streamed response, so the numbers are what a caller sees. Queue depth and KV usage come from each server's Prometheus `/metrics` endpoint, sampled during each concurrency level.
 
@@ -9,28 +9,33 @@ Latency is measured client-side from the streamed response, so the numbers are w
 ## Results
 
 <!-- results:start -->
-| workload | server | concurrency | ttft_p50_ms | ttft_p95_ms | itl_mean_ms | throughput_tok_s | queue_depth | kv_usage | errors |
-|---|---|---|---|---|---|---|---|---|---|
-| shared-prefix | sglang | 1 | 661.1 | 920.9 | 32.8 | 25.3 | 0.0 | 0.2 | 0.0 |
-| shared-prefix | sglang | 4 | 702.9 | 1685.3 | 33.6 | 96.2 | 0.0 | 0.2 | 1.0 |
-| shared-prefix | sglang | 16 | 897.0 | 1170.6 | 36.4 | 281.3 | 0.0 | 0.2 | 0.0 |
-| shared-prefix | sglang | 64 | 1252.6 | 4386.5 | 43.7 | 861.4 | 4.5 | 0.4 | 0.0 |
-| shared-prefix | sglang | 128 | 7245.8 | 10204.1 | 47.6 | 1030.1 | 9.8 | 0.5 | 0.0 |
-| shared-prefix | vllm | 1 | 242.2 | 492.9 | 32.1 | 27.6 | 0.0 | 0.0 | 1.0 |
-| shared-prefix | vllm | 4 | 510.4 | 551.0 | 32.8 | 108.1 | 0.0 | 0.0 | 1.0 |
-| shared-prefix | vllm | 16 | 566.8 | 651.2 | 35.2 | 308.8 | 0.0 | 0.0 | 0.0 |
-| shared-prefix | vllm | 64 | 866.3 | 1170.4 | 45.1 | 989.3 | 0.0 | 0.1 | 0.0 |
-| shared-prefix | vllm | 128 | 1751.9 | 6271.6 | 55.8 | 1237.0 | 0.0 | 0.1 | 0.0 |
-| short | sglang | 1 | 677.2 | 874.3 | 32.4 | 28.7 | 0.0 | 0.0 | 0.0 |
-| short | sglang | 4 | 730.6 | 1224.9 | 32.9 | 107.8 | 0.0 | 0.0 | 1.0 |
-| short | sglang | 16 | 885.3 | 1002.8 | 33.8 | 428.2 | 0.0 | 0.2 | 0.0 |
-| short | sglang | 64 | 1197.7 | 9706.5 | 37.4 | 1101.2 | 7.6 | 0.4 | 0.0 |
-| short | sglang | 128 | 10649.3 | 20009.6 | 42.3 | 1126.2 | 5.4 | 0.3 | 0.0 |
-| short | vllm | 1 | 467.3 | 500.1 | 32.5 | 29.0 | 0.0 | 0.0 | 1.0 |
-| short | vllm | 4 | 519.8 | 561.8 | 32.7 | 115.3 | 0.0 | 0.0 | 0.0 |
-| short | vllm | 16 | 572.1 | 663.9 | 33.9 | 442.8 | 0.0 | 0.0 | 0.0 |
-| short | vllm | 64 | 838.5 | 1168.5 | 36.5 | 1594.1 | 0.0 | 0.1 | 0.0 |
-| short | vllm | 128 | 2489.1 | 13182.0 | 41.8 | 1774.7 | 0.0 | 0.1 | 0.0 |
+| workload | model | server | concurrency | ttft_p50_ms | ttft_p95_ms | itl_mean_ms | throughput_tok_s | queue_depth | kv_usage | errors |
+|---|---|---|---|---|---|---|---|---|---|---|
+| shared-prefix | Qwen2.5-7B-Instruct | sglang | 1 | 661.1 | 920.9 | 32.8 | 25.3 | 0.0 | 0.2 | 0.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | sglang | 4 | 702.9 | 1685.3 | 33.6 | 96.2 | 0.0 | 0.2 | 1.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | sglang | 16 | 897.0 | 1170.6 | 36.4 | 281.3 | 0.0 | 0.2 | 0.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | sglang | 64 | 1252.6 | 4386.5 | 43.7 | 861.4 | 4.5 | 0.4 | 0.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | sglang | 128 | 7245.8 | 10204.1 | 47.6 | 1030.1 | 9.8 | 0.5 | 0.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | vllm | 1 | 242.2 | 492.9 | 32.1 | 27.6 | 0.0 | 0.0 | 1.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | vllm | 4 | 510.4 | 551.0 | 32.8 | 108.1 | 0.0 | 0.0 | 1.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | vllm | 16 | 566.8 | 651.2 | 35.2 | 308.8 | 0.0 | 0.0 | 0.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | vllm | 64 | 866.3 | 1170.4 | 45.1 | 989.3 | 0.0 | 0.1 | 0.0 |
+| shared-prefix | Qwen2.5-7B-Instruct | vllm | 128 | 1751.9 | 6271.6 | 55.8 | 1237.0 | 0.0 | 0.1 | 0.0 |
+| short | Qwen2.5-7B-Instruct | sglang | 1 | 677.2 | 874.3 | 32.4 | 28.7 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct | sglang | 4 | 730.6 | 1224.9 | 32.9 | 107.8 | 0.0 | 0.0 | 1.0 |
+| short | Qwen2.5-7B-Instruct | sglang | 16 | 885.3 | 1002.8 | 33.8 | 428.2 | 0.0 | 0.2 | 0.0 |
+| short | Qwen2.5-7B-Instruct | sglang | 64 | 1197.7 | 9706.5 | 37.4 | 1101.2 | 7.6 | 0.4 | 0.0 |
+| short | Qwen2.5-7B-Instruct | sglang | 128 | 10649.3 | 20009.6 | 42.3 | 1126.2 | 5.4 | 0.3 | 0.0 |
+| short | Qwen2.5-7B-Instruct | vllm | 1 | 467.3 | 500.1 | 32.5 | 29.0 | 0.0 | 0.0 | 1.0 |
+| short | Qwen2.5-7B-Instruct | vllm | 4 | 519.8 | 561.8 | 32.7 | 115.3 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct | vllm | 16 | 572.1 | 663.9 | 33.9 | 442.8 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct | vllm | 64 | 838.5 | 1168.5 | 36.5 | 1594.1 | 0.0 | 0.1 | 0.0 |
+| short | Qwen2.5-7B-Instruct | vllm | 128 | 2489.1 | 13182.0 | 41.8 | 1774.7 | 0.0 | 0.1 | 0.0 |
+| short | Qwen3-8B | vllm | 1 | 396.8 | 766.6 | 34.1 | 28.6 | 0.0 | 0.0 | 0.0 |
+| short | Qwen3-8B | vllm | 4 | 709.6 | 823.1 | 36.4 | 106.2 | 0.0 | 0.1 | 0.0 |
+| short | Qwen3-8B | vllm | 16 | 869.9 | 987.6 | 39.2 | 316.6 | 0.0 | 0.2 | 0.0 |
+| short | Qwen3-8B | vllm | 64 | 1064.7 | 8017.4 | 56.8 | 789.9 | 5.4 | 0.6 | 0.0 |
+| short | Qwen3-8B | vllm | 128 | 14628.0 | 50058.7 | 76.1 | 1044.0 | 13.8 | 0.8 | 0.0 |
 <!-- results:end -->
 
 Hardware and model are set by the `GPU` and `MODEL` env vars at deploy time, default A10G and Qwen/Qwen2.5-7B-Instruct.
@@ -61,6 +66,40 @@ SGLang degraded more gracefully at 128 than in experiment 1: median TTFT 7.2 s i
 
 SGLang's extra 150 to 400 ms of TTFT at every level is still there and still unexplained.
 
+### Experiment 3: reasoning effort
+
+Qwen3-8B on vLLM with `--reasoning-parser qwen3`, short workload, `max_tokens` 2048, three modes per request: thinking off, thinking with a 512-token budget, thinking unbounded. `ttfvt` is time to first visible token, the number a user feels. `answered_pct` is the share of requests that produced any visible answer before `max_tokens`. Chunk counts approximate tokens.
+
+<!-- reasoning:start -->
+| model | reasoning | concurrency | ttft_p50_ms | ttfvt_p50_ms | ttfvt_p95_ms | reasoning_chunks_mean | visible_chunks_mean | answered_pct | visible_tok_s | errors |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Qwen3-8B | budget | 1 | 459.3 | 17961.2 | 18358.4 | 508.3 | 611.0 | 100.0 | 12.8 | 4.0 |
+| Qwen3-8B | budget | 4 | 333.5 | 19408.2 | 19758.1 | 508.5 | 693.8 | 100.0 | 55.5 | 0.0 |
+| Qwen3-8B | budget | 16 | 664.1 | 20318.6 | 20949.2 | 508.5 | 579.6 | 100.0 | 177.1 | 0.0 |
+| Qwen3-8B | budget | 64 | 1334.0 | 44149.2 | 66642.1 | 509.3 | 589.7 | 100.0 | 404.2 | 0.0 |
+| Qwen3-8B | budget | 128 | 31828.9 | 105742.7 | 126800.3 | 509.9 | 568.5 | 100.0 | 448.0 | 0.0 |
+| Qwen3-8B | off | 1 | 396.8 | 396.8 | 766.6 | 0.0 | 697.7 | 100.0 | 28.3 | 0.0 |
+| Qwen3-8B | off | 4 | 709.6 | 709.6 | 823.1 | 0.0 | 716.8 | 100.0 | 105.2 | 0.0 |
+| Qwen3-8B | off | 16 | 869.9 | 869.9 | 987.6 | 0.0 | 719.4 | 100.0 | 313.4 | 0.0 |
+| Qwen3-8B | off | 64 | 1064.7 | 1064.7 | 8017.4 | 0.0 | 728.1 | 100.0 | 782.4 | 0.0 |
+| Qwen3-8B | off | 128 | 14628.0 | 14628.0 | 50058.7 | 0.0 | 721.1 | 100.0 | 1033.9 | 0.0 |
+| Qwen3-8B | on | 1 | 282.2 | 43455.3 | 58339.2 | 1189.2 | 575.9 | 100.0 | 9.6 | 0.0 |
+| Qwen3-8B | on | 4 | 330.4 | 49251.1 | 70712.1 | 1327.8 | 439.1 | 87.5 | 25.0 | 0.0 |
+| Qwen3-8B | on | 16 | 702.0 | 46615.1 | 78226.2 | 1239.0 | 443.8 | 93.8 | 85.0 | 0.0 |
+| Qwen3-8B | on | 64 | 6361.7 | 82012.0 | 167329.8 | 1217.4 | 454.8 | 85.6 | 145.0 | 31.0 |
+| Qwen3-8B | on | 128 | 26572.8 | 151990.4 | 222476.5 | 1285.5 | 415.8 | 92.3 | 118.4 | 152.0 |
+<!-- reasoning:end -->
+
+Thinking tokens cost exactly what answer tokens cost. ITL at concurrency 1 is 34 ms in all three modes and tracks the same curve up through 128, so the engine does not distinguish the two. The budget is enforced to the token: every budget row shows 508 to 510 reasoning chunks, and unbounded thinking used 1190 to 1330 on the same five prompts.
+
+TTFT becomes a vanity metric. With thinking on, median TTFT stays at 0.3 to 0.7 s up to 16 streams while the first visible token arrives after 43 to 49 s unbounded and 18 to 20 s with the 512 budget. The budget number is just the budget times the ITL. A user-facing SLO on a reasoning model has to be on TTFVT, and the queue and KV alarms fire long before TTFT moves.
+
+Useful throughput falls by more than the thinking share suggests. At 128 streams the server produced 1034 visible tokens per second with thinking off, 448 with the budget and 118 unbounded. Thinking off is also not the Qwen2.5 baseline: Qwen3-8B writes about 720 visible tokens per answer against the 256 cap in experiments 1 and 2, so each request holds three times the KV and the pool fills at 64 streams (queue depth 5.4, KV 62 percent) where Qwen2.5 showed no queue. Thinking makes that worse, 80 and 85 percent KV at 64 for budget and unbounded, because every in-flight request carries its thinking tokens until it finishes.
+
+Unbounded thinking did not answer reliably. Between 6 and 14 percent of requests hit `max_tokens` 2048 inside or right after the thinking block and returned no visible answer at all, and the budget mode answered 100 percent in every row. Above 16 streams the unbounded sweep also lost 31 of 128 streams at 64 and 152 of 256 at 128 to the same mid-stream disconnect seen in experiment 1, now at scale: surviving requests ran two to four minutes and the dropped ones were presumably the longer tail, so those two rows are optimistic. Streams that long are not something this ingress path serves reliably, and the table reports survivors only.
+
+The practical reading is the one the primer gives: thinking off for simple turns, a budget for most, unbounded only where the task needs it and the client can wait a minute, and capacity planned on visible tokens per second rather than total.
+
 ### Not measured here
 
 SGLang with `--mem-fraction-static 0.9`, which would test how much of its throughput deficit is the default KV pool size. Structured output. Long contexts that are not shared. Other GPUs. Quantised weights.
@@ -83,7 +122,17 @@ make bench URL=https://<sglang-url> SERVER=sglang WORKLOAD=shared-prefix
 make report
 ```
 
-`make report` rewrites the results table above from `results/*.parquet`.
+For the reasoning experiment, deploy Qwen3-8B as a second vLLM app and sweep each mode:
+
+```bash
+make deploy-qwen3
+make bench-reasoning URL=https://<qwen3-url> REASONING=off
+make bench-reasoning URL=https://<qwen3-url> REASONING=budget
+make bench-reasoning URL=https://<qwen3-url> REASONING=on
+make report
+```
+
+`make report` rewrites both tables above from `results/*.parquet`.
 
 Sweep settings: `python -m bench.load --help`. Defaults are the short workload, concurrency 1, 4, 16, 64, 128, 256 max tokens, and at least 32 requests or two full waves per level, whichever is larger.
 

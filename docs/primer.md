@@ -78,6 +78,25 @@ The L4 is newer and slower for decode because it is a low-power card with half t
 
 Quantisation changes ITL without changing hardware: int8 or fp8 weights halve the bytes read per step and double the KV headroom.
 
+## Reasoning models and thinking effort
+
+Some models (Qwen3, DeepSeek-R1, gpt-oss) write a hidden chain of thought before the visible answer. The engine serves those thinking tokens exactly like answer tokens: each one is a decode step and costs the same GPU time and KV memory. "Reasoning effort" is the knob that controls how much of that hidden work happens, and it is set at serve time and per request.
+
+The three settings that matter when serving such a model:
+
+- Thinking on or off. For Qwen3 it is a chat-template switch, `enable_thinking`, sent per request. Off makes the model answer directly like a normal chat model.
+- A thinking budget. vLLM accepts `thinking_token_budget` per request when the server was started with `--reasoning-parser`. When the budget runs out the server forces the closing think marker so the model has to answer.
+- A reasoning parser. Started with `--reasoning-parser qwen3`, the server splits the stream into `reasoning` and `content` fields so clients can hide or show the thinking.
+
+What reasoning does to the metrics in this repo:
+
+- Time to first token stays small and becomes misleading, because the first token is the start of the thinking block. The number a user feels is time to first visible token, TTFVT, which can be seconds. The report has a separate column for it.
+- Throughput of useful tokens drops by whatever share of the output was thinking. The report counts reasoning and visible chunks separately and reports visible tokens per second.
+- Some requests never produce a visible answer when `max_tokens` runs out inside the thinking block. The report shows this as the answered percentage. A budget prevents it at the cost of answer quality on hard prompts.
+- Every in-flight request holds its thinking tokens in the KV cache until it finishes, so a thinking model fills the pool faster than a chat model at the same concurrency.
+
+So "effort" is a trade of answer quality against latency and GPU cost. The practical pattern is to run thinking off for simple turns, a small budget for most, and unbounded only where the task needs it, and to alarm on TTFVT rather than TTFT.
+
 ## How a production team would structure this
 
 First decision: managed API or self-hosted. Managed (Bedrock, OpenAI) means no engine, no capacity planning, pay per token, no control over latency under load. Self-hosted wins when token volume makes per-token pricing expensive, when a fine-tuned or domain model is needed, when p95 latency must be controlled, or when data residency rules out the managed API.
@@ -108,3 +127,7 @@ Second decision: capacity. The benchmark in this repo is the capacity planning e
 - Memory fraction: the share of GPU memory the engine reserves for weights plus KV cache. vLLM defaults to 0.9, SGLang to about 0.68.
 - Streaming: returning tokens as server-sent events as they are generated rather than waiting for the full response.
 - OpenAI-compatible API: the request and response shapes of `/v1/chat/completions`, adopted by every open-source engine so clients can switch backends without code changes.
+- Thinking tokens: the hidden chain of thought a reasoning model emits before its answer, served and billed like any other tokens.
+- Thinking budget: a per-request cap on thinking tokens; when hit, the server forces the model to close the thinking block and answer.
+- Reasoning parser: the engine component that splits a stream into reasoning and content so clients can hide the thinking.
+- TTFVT, time to first visible token: the delay a user feels with a reasoning model, from request to the first answer token after the thinking block.

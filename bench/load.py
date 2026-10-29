@@ -22,6 +22,7 @@ PROMPTS = [
 ]
 
 WORKLOADS = ["short", "shared-prefix"]
+REASONING_MODES = ["off", "on", "budget"]
 
 _RULES = [
     "Answer in the learner's target language first, then give a one-line gloss in English.",
@@ -61,10 +62,11 @@ def messages_for(workload: str, i: int) -> list[dict[str, str]]:
     return [user]
 
 
-async def stream_one(
-    client: httpx.AsyncClient, messages: list[dict[str, str]], max_tokens: int
-) -> RequestStats:
-    body = {
+def request_body(
+    messages: list[dict[str, str]], max_tokens: int, reasoning: str | None, budget: int
+) -> dict[str, Any]:
+    """OpenAI chat body; reasoning modes map to vLLM's Qwen3 chat-template kwargs and budget."""
+    body: dict[str, Any] = {
         "model": "model",
         "messages": messages,
         "max_tokens": max_tokens,
@@ -72,8 +74,18 @@ async def stream_one(
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    if reasoning is not None:
+        body["chat_template_kwargs"] = {"enable_thinking": reasoning != "off"}
+    if reasoning == "budget":
+        body["thinking_token_budget"] = budget
+    return body
+
+
+async def stream_one(client: httpx.AsyncClient, body: dict[str, Any]) -> RequestStats:
     start = time.perf_counter()
     chunk_times: list[float] = []
+    first_visible: float | None = None
+    reasoning_chunks = 0
     usage_tokens: int | None = None
     async with client.stream("POST", "/v1/chat/completions", json=body) as resp:
         resp.raise_for_status()
@@ -87,10 +99,16 @@ async def stream_one(
             if usage := event.get("usage"):
                 usage_tokens = usage.get("completion_tokens")
             choices = event.get("choices") or []
-            if choices and choices[0].get("delta", {}).get("content"):
+            delta = choices[0].get("delta", {}) if choices else {}
+            if delta.get("reasoning") or delta.get("reasoning_content"):
                 chunk_times.append(time.perf_counter())
+                reasoning_chunks += 1
+            elif delta.get("content"):
+                chunk_times.append(time.perf_counter())
+                if first_visible is None:
+                    first_visible = chunk_times[-1]
     tokens = usage_tokens if usage_tokens is not None else len(chunk_times)
-    return summarize_stream(start, chunk_times, tokens)
+    return summarize_stream(start, chunk_times, tokens, first_visible, reasoning_chunks)
 
 
 async def sample_metrics(
@@ -112,21 +130,19 @@ async def sample_metrics(
 
 
 async def run_level(
-    client: httpx.AsyncClient,
-    server: str,
-    workload: str,
-    concurrency: int,
-    n_requests: int,
-    max_tokens: int,
+    client: httpx.AsyncClient, args: argparse.Namespace, concurrency: int, n_requests: int
 ) -> list[dict[str, Any]]:
     sem = asyncio.Semaphore(concurrency)
     stop = asyncio.Event()
-    sampler = asyncio.create_task(sample_metrics(client, server, stop))
+    sampler = asyncio.create_task(sample_metrics(client, args.server_name, stop))
 
     async def guarded(i: int) -> RequestStats | None:
         async with sem:
+            body = request_body(
+                messages_for(args.workload, i), args.max_tokens, args.reasoning, args.budget
+            )
             try:
-                return await stream_one(client, messages_for(workload, i), max_tokens)
+                return await stream_one(client, body)
             except (httpx.HTTPError, ValueError) as exc:
                 # Dropped streams are a property of the system under test; count, don't abort.
                 print(f"  request {i} failed: {type(exc).__name__}: {exc}")
@@ -140,13 +156,18 @@ async def run_level(
     errors = sum(s is None for s in stats)
     return [
         {
-            "server": server,
-            "workload": workload,
+            "server": args.server_name,
+            "model": args.model_name,
+            "workload": args.workload,
+            "reasoning": args.reasoning or "off",
             "concurrency": concurrency,
             "request_idx": i,
             "ttft_s": s.ttft_s,
+            "ttfvt_s": s.ttfvt_s,
             "itl_mean_s": s.itl_mean_s,
             "tokens": s.tokens,
+            "reasoning_chunks": s.reasoning_chunks,
+            "visible_chunks": s.visible_chunks,
             "total_s": s.total_s,
             "level_wall_s": wall,
             "level_errors": errors,
@@ -160,24 +181,28 @@ async def run_level(
 async def main_async(args: argparse.Namespace) -> None:
     rows: list[dict[str, Any]] = []
     async with httpx.AsyncClient(base_url=args.base_url, timeout=args.timeout) as client:
-        await stream_one(client, messages_for(args.workload, 0), 16)  # warm up
+        warm = request_body(messages_for(args.workload, 0), 16, args.reasoning, args.budget)
+        try:
+            await stream_one(client, warm)
+        except (httpx.HTTPError, ValueError) as exc:
+            print(f"warm-up failed: {type(exc).__name__}: {exc}")
         for c in args.concurrency:
             # At least two full waves, otherwise high levels never reach their concurrency.
             n_requests = max(args.requests_per_level, 2 * c)
-            level = await run_level(
-                client, args.server_name, args.workload, c, n_requests, args.max_tokens
-            )
+            level = await run_level(client, args, c, n_requests)
             rows.extend(level)
             if not level:
                 print(f"{args.server_name} c={c:>3} every request failed")
                 continue
             df = pd.DataFrame(level)
             tput = df["tokens"].sum() / df["level_wall_s"].iloc[0]
+            answered = df["ttfvt_s"].notna().mean() * 100
             print(
-                f"{args.server_name} {args.workload} c={c:>3} "
+                f"{args.server_name} {args.workload} reasoning={args.reasoning or 'off'} c={c:>3} "
                 f"ttft_p50={df['ttft_s'].median() * 1000:.0f}ms "
+                f"ttfvt_p50={df['ttfvt_s'].median() * 1000:.0f}ms "
                 f"itl={df['itl_mean_s'].mean() * 1000:.1f}ms tput={tput:.0f} tok/s "
-                f"errors={df['level_errors'].iloc[0]}"
+                f"answered={answered:.0f}% errors={df['level_errors'].iloc[0]}"
             )
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -189,7 +214,17 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--base-url", required=True)
     p.add_argument("--server-name", required=True, choices=["vllm", "sglang"])
+    p.add_argument("--model-name", default="Qwen2.5-7B-Instruct")
     p.add_argument("--workload", choices=WORKLOADS, default="short")
+    p.add_argument(
+        "--reasoning",
+        choices=REASONING_MODES,
+        default=None,
+        help="thinking-model mode; omit for models without a thinking switch",
+    )
+    p.add_argument(
+        "--budget", type=int, default=512, help="thinking token budget for --reasoning budget"
+    )
     p.add_argument(
         "--concurrency", type=lambda s: [int(x) for x in s.split(",")], default=[1, 4, 16, 64, 128]
     )
