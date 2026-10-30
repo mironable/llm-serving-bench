@@ -1,10 +1,12 @@
 # llm-serving-bench
 
-Serves Qwen2.5-7B-Instruct with vLLM and with SGLang on Modal, plus Qwen3-8B on vLLM for the reasoning experiment, then measures what matters for a serving system under load: time to first token, inter-token latency, throughput, queue depth and KV-cache usage.
+A hands-on study of LLM serving by an ML engineer who has run conventional models in production and is new to this stack. Instead of reading about inference engines, it deploys them and measures them, one question per experiment: which engine, how many users per GPU, what a shared prompt does, what a thinking model costs, how model size and weight format move the numbers.
+
+It serves Qwen2.5-7B-Instruct with vLLM and with SGLang on Modal, plus Qwen3-8B, Qwen2.5-1.5B, Qwen2.5-Coder-7B, gpt-oss-20b and three quantised 7B variants on vLLM, then measures what matters for a serving system under load: time to first token, inter-token latency, throughput, queue depth and KV-cache usage.
 
 Latency is measured client-side from the streamed response, so the numbers are what a caller sees. Queue depth and KV usage come from each server's Prometheus `/metrics` endpoint, sampled during each concurrency level.
 
-[docs/architecture.md](docs/architecture.md) walks through the request pipeline, shows where each metric is measured, and explains why these two servers are the ones worth comparing.
+[docs/architecture.md](docs/architecture.md) walks the path of one request, shows where each metric is measured, and explains why these two servers are the ones worth comparing. [docs/primer.md](docs/primer.md) explains the terms, with one worked analogy to a conventional model endpoint for readers coming from there.
 
 ## Results
 
@@ -21,6 +23,11 @@ Latency is measured client-side from the streamed response, so the numbers are w
 | shared-prefix | Qwen2.5-7B-Instruct | vllm | 16 | 566.8 | 651.2 | 35.2 | 308.8 | 0.0 | 0.0 | 0.0 |
 | shared-prefix | Qwen2.5-7B-Instruct | vllm | 64 | 866.3 | 1170.4 | 45.1 | 989.3 | 0.0 | 0.1 | 0.0 |
 | shared-prefix | Qwen2.5-7B-Instruct | vllm | 128 | 1751.9 | 6271.6 | 55.8 | 1237.0 | 0.0 | 0.1 | 0.0 |
+| short | Qwen2.5-1.5B-Instruct | vllm | 1 | 455.2 | 821.0 | 7.9 | 97.9 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-1.5B-Instruct | vllm | 4 | 800.4 | 907.9 | 8.0 | 350.6 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-1.5B-Instruct | vllm | 16 | 899.0 | 1079.5 | 8.4 | 1266.3 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-1.5B-Instruct | vllm | 64 | 1403.7 | 3548.5 | 9.8 | 3006.9 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-1.5B-Instruct | vllm | 128 | 3584.6 | 18312.1 | 9.7 | 3070.0 | 0.0 | 0.0 | 0.0 |
 | short | Qwen2.5-7B-Instruct | sglang | 1 | 677.2 | 874.3 | 32.4 | 28.7 | 0.0 | 0.0 | 0.0 |
 | short | Qwen2.5-7B-Instruct | sglang | 4 | 730.6 | 1224.9 | 32.9 | 107.8 | 0.0 | 0.0 | 1.0 |
 | short | Qwen2.5-7B-Instruct | sglang | 16 | 885.3 | 1002.8 | 33.8 | 428.2 | 0.0 | 0.2 | 0.0 |
@@ -31,6 +38,26 @@ Latency is measured client-side from the streamed response, so the numbers are w
 | short | Qwen2.5-7B-Instruct | vllm | 16 | 572.1 | 663.9 | 33.9 | 442.8 | 0.0 | 0.0 | 0.0 |
 | short | Qwen2.5-7B-Instruct | vllm | 64 | 838.5 | 1168.5 | 36.5 | 1594.1 | 0.0 | 0.1 | 0.0 |
 | short | Qwen2.5-7B-Instruct | vllm | 128 | 2489.1 | 13182.0 | 41.8 | 1774.7 | 0.0 | 0.1 | 0.0 |
+| short | Qwen2.5-7B-Instruct-AWQ | vllm | 1 | 475.3 | 817.3 | 10.6 | 78.0 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-AWQ | vllm | 4 | 855.7 | 1662.2 | 10.7 | 265.5 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-AWQ | vllm | 16 | 1101.7 | 3317.5 | 11.6 | 782.8 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-AWQ | vllm | 64 | 1377.1 | 18251.1 | 13.8 | 1496.0 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-AWQ | vllm | 128 | 3933.4 | 9246.9 | 32.7 | 2318.9 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-GPTQ-Int8 | vllm | 1 | 214.8 | 555.0 | 16.9 | 55.0 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-GPTQ-Int8 | vllm | 4 | 555.0 | 654.7 | 17.1 | 201.3 | 0.0 | 0.0 | 1.0 |
+| short | Qwen2.5-7B-Instruct-GPTQ-Int8 | vllm | 16 | 601.2 | 844.0 | 18.0 | 771.8 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-GPTQ-Int8 | vllm | 64 | 1478.6 | 3379.8 | 24.4 | 1920.2 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-GPTQ-Int8 | vllm | 128 | 5481.3 | 13584.6 | 37.0 | 1790.2 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-fp8 | vllm | 1 | 242.7 | 595.1 | 16.9 | 54.6 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-fp8 | vllm | 4 | 566.7 | 739.7 | 17.0 | 204.9 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-fp8 | vllm | 16 | 768.9 | 1961.6 | 17.5 | 696.7 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-fp8 | vllm | 64 | 1469.8 | 21992.5 | 18.9 | 1170.8 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-7B-Instruct-fp8 | vllm | 128 | 6434.7 | 10407.6 | 32.8 | 1900.9 | 0.0 | 0.0 | 4.0 |
+| short | Qwen2.5-Coder-7B-Instruct | vllm | 1 | 826.0 | 931.2 | 32.5 | 28.4 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-Coder-7B-Instruct | vllm | 4 | 829.6 | 951.6 | 32.9 | 110.1 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-Coder-7B-Instruct | vllm | 16 | 985.5 | 1030.4 | 34.0 | 414.7 | 0.0 | 0.0 | 0.0 |
+| short | Qwen2.5-Coder-7B-Instruct | vllm | 64 | 1104.8 | 3025.4 | 36.6 | 1397.9 | 0.0 | 0.1 | 0.0 |
+| short | Qwen2.5-Coder-7B-Instruct | vllm | 128 | 3536.9 | 12933.6 | 43.7 | 1711.2 | 0.0 | 0.1 | 1.0 |
 | short | Qwen3-8B | vllm | 1 | 396.8 | 766.6 | 34.1 | 28.6 | 0.0 | 0.0 | 0.0 |
 | short | Qwen3-8B | vllm | 4 | 709.6 | 823.1 | 36.4 | 106.2 | 0.0 | 0.1 | 0.0 |
 | short | Qwen3-8B | vllm | 16 | 869.9 | 987.6 | 39.2 | 316.6 | 0.0 | 0.2 | 0.0 |
@@ -88,6 +115,16 @@ Qwen3-8B on vLLM with `--reasoning-parser qwen3`, short workload, `max_tokens` 2
 | Qwen3-8B | on | 16 | 702.0 | 46615.1 | 78226.2 | 1239.0 | 443.8 | 93.8 | 85.0 | 0.0 |
 | Qwen3-8B | on | 64 | 6361.7 | 82012.0 | 167329.8 | 1217.4 | 454.8 | 85.6 | 145.0 | 31.0 |
 | Qwen3-8B | on | 128 | 26572.8 | 151990.4 | 222476.5 | 1285.5 | 415.8 | 92.3 | 118.4 | 152.0 |
+| gpt-oss-20b | low | 1 | 512.5 | 796.9 | 1610.8 | 9.2 | 726.1 | 100.0 | 90.6 | 0.0 |
+| gpt-oss-20b | low | 4 | 831.8 | 1021.9 | 1439.9 | 9.4 | 756.8 | 100.0 | 219.6 | 0.0 |
+| gpt-oss-20b | low | 16 | 1005.8 | 1270.1 | 1737.8 | 9.4 | 739.8 | 100.0 | 508.6 | 0.0 |
+| gpt-oss-20b | low | 64 | 1157.5 | 1467.3 | 9487.9 | 9.5 | 750.1 | 100.0 | 1424.5 | 0.0 |
+| gpt-oss-20b | low | 128 | 7947.3 | 8402.9 | 25233.4 | 9.6 | 755.0 | 100.0 | 1985.2 | 0.0 |
+| gpt-oss-20b | medium | 1 | 503.4 | 2399.6 | 18191.5 | 1228.4 | 278.1 | 56.2 | 17.8 | 0.0 |
+| gpt-oss-20b | medium | 4 | 784.0 | 18720.5 | 33802.5 | 1069.9 | 468.1 | 84.4 | 67.8 | 0.0 |
+| gpt-oss-20b | medium | 16 | 915.8 | 14507.5 | 44509.5 | 994.9 | 536.8 | 84.4 | 176.9 | 0.0 |
+| gpt-oss-20b | medium | 64 | 1161.3 | 19808.2 | 64003.6 | 979.1 | 572.5 | 84.4 | 536.3 | 0.0 |
+| gpt-oss-20b | medium | 128 | 6034.8 | 42376.2 | 108756.4 | 1020.0 | 522.7 | 78.9 | 676.0 | 0.0 |
 <!-- reasoning:end -->
 
 Thinking tokens cost exactly what answer tokens cost. ITL at concurrency 1 is 34 ms in all three modes and tracks the same curve up through 128, so the engine does not distinguish the two. The budget is enforced to the token: every budget row shows 508 to 510 reasoning chunks, and unbounded thinking used 1190 to 1330 on the same five prompts.
@@ -100,9 +137,35 @@ Unbounded thinking did not answer reliably. Between 6 and 14 percent of requests
 
 The practical reading is the one the primer gives: thinking off for simple turns, a budget for most, unbounded only where the task needs it and the client can wait a minute, and capacity planned on visible tokens per second rather than total.
 
+### Experiment 4: model matrix
+
+Four more models on the same A10G, vLLM, short workload, to see what the choice of model does to the serving numbers: Qwen2.5-1.5B-Instruct as the small chat model, Qwen2.5-Coder-7B-Instruct as the coder, Qwen3-8B from experiment 3, and openai/gpt-oss-20b, a mixture-of-experts reasoning model with 3.6B of its 21B parameters active per token, served with `--reasoning-parser openai_gptoss` and the per-request `reasoning_effort` set to low and then to medium. The chat models ran at 256 max tokens, gpt-oss at 1024 for low and 2048 for medium because it writes about 750 tokens per answer before any thinking. This measures serving cost only; nothing here says which model answers better.
+
+Model size sets decode speed, through bytes per step. At concurrency 1 the 1.5B decodes at 7.9 ms, the three 7B to 8B dense models at 32.5 to 34.1 ms, and gpt-oss-20b at 9.7 ms. The 20B model is faster than the 7B because at batch size 1 a token only reads its four active experts per layer, about 2 GB of mxfp4 weights, against 15 GB of bf16 for the dense 7B.
+
+A mixture-of-experts model loses that advantage as the batch grows. gpt-oss ITL went 9.7, 16, 24, 32, 39 ms from 1 to 128 streams, a four-fold rise, while the dense 7B went 32.5 to 41.8 ms, 1.3-fold. With many tokens in a step every expert gets some of them, so the step reads all of the weights and the per-token cost converges on the dense one. Its total throughput at 128 was still 2037 tok/s, the best of the 7B-class models, because mxfp4 weights leave the most room for KV.
+
+The small model never found its knee. Qwen2.5-1.5B held 9.7 ms ITL at 128 streams, used under 1 percent of the KV pool, and produced 3070 tok/s with no queue. At that size the GPU is limited by per-step overhead rather than bandwidth, and one A10G would serve well over 128 concurrent users of it. TTFT at concurrency 1 is the same 450 ms for the 1.5B and the 7B, so that floor is the network round trip and request handling rather than prefill.
+
+The coder is the base model with different weights. Qwen2.5-Coder-7B matched Qwen2.5-7B on ITL and throughput at every level, which is expected for the same architecture, except that its median TTFT was about 300 ms higher at every level from 1 to 128. The other runs made the same morning had floors between 215 and 475 ms, so this is outside the run-to-run noise and not explained.
+
+The effort knob on gpt-oss is a different shape from Qwen3's switch. At low effort the model barely thinks: about nine reasoning chunks per request, the first visible token 300 ms after the first token, every request answered, so it behaves as a fast chat model with a long-winded style. Medium effort thought for about 1000 to 1200 tokens on the same prompts, the same amount as Qwen3 unbounded, and only 56 to 84 percent of requests answered within 2048 tokens; the rest ran out inside the thinking block. There is no per-request budget for it the way there is for Qwen3, so the only guard against an unanswered request is `max_tokens`, and the median time to first visible token among those that did answer ran from 2.4 s at concurrency 1 to 42 s at 128. The decode cost was unchanged, 9.9 to 41 ms ITL at the same levels as low, which again says the engine does not care whether a token is thinking or answer. No stream was dropped in either run, since the longest request stayed near two minutes.
+
+### Experiment 5: quantisation
+
+Qwen2.5-7B-Instruct on the same A10G and vLLM in four weight formats: bf16 from experiment 1, GPTQ int8 and AWQ int4 from Qwen's published checkpoints, and fp8 quantised at load time with `--quantization fp8`, which on an Ampere card runs as weight-only fp8 through the Marlin kernel. Short workload, 256 max tokens.
+
+Bytes per step predict low-concurrency ITL. bf16 32.5 ms, int8 16.9, fp8 16.9, int4 10.6 at concurrency 1. Halving the weights halved the step time to the millisecond; int4 gave three times rather than four because dequantisation is not free. For a user talking to an otherwise idle server, int4 turns 30 tokens per second into 95.
+
+The gain shrinks at the knee. At 128 streams all four formats decoded at 33 to 42 ms, and throughput was 1775 bf16, 1790 int8, 1901 fp8, 2319 int4. Once the batch is large the dequantised matrix multiplies are compute-bound and the bandwidth saving no longer matters, so quantisation bought 0 to 30 percent of throughput at full load against 2 to 3 times at light load. What it bought at every level was memory: KV usage at 64 streams was 1 to 4 percent against 10 percent for bf16, which is the headroom that would let a longer context or more concurrent users fit before queueing.
+
+Two throughput cells are depressed by a stall rather than the engine. At 64 streams one int4 request and one fp8 request had a TTFT of 18 and 23 s and finished last, which stretched the level's wall clock from about 13 s to 22 and 28 s. Throughput is tokens over wall time, so those cells read 1496 and 1171 tok/s while every other request in the level had a 1.4 s median TTFT. It is the same ingress stall that drops streams elsewhere, caught by the clock instead of a disconnect.
+
+Not measured: answer quality. Quantisation pays for its speed with accuracy, and the amount depends on the model and the method, so an eval on the actual task has to accompany the serving numbers before adopting a format.
+
 ### Not measured here
 
-SGLang with `--mem-fraction-static 0.9`, which would test how much of its throughput deficit is the default KV pool size. Structured output. Long contexts that are not shared. Other GPUs. Quantised weights.
+SGLang with `--mem-fraction-static 0.9`, which would test how much of its throughput deficit is the default KV pool size. Structured output. Long contexts that are not shared. Other GPUs. Answer quality of any model, mode or weight format.
 
 ## Run it
 
@@ -129,6 +192,30 @@ make deploy-qwen3
 make bench-reasoning URL=https://<qwen3-url> REASONING=off
 make bench-reasoning URL=https://<qwen3-url> REASONING=budget
 make bench-reasoning URL=https://<qwen3-url> REASONING=on
+make report
+```
+
+For the model matrix, deploy any model vLLM can serve as its own app and sweep it on the short workload. `EFFORT` sets a per-request reasoning effort for models that take one:
+
+```bash
+make deploy MODEL=Qwen/Qwen2.5-1.5B-Instruct SUFFIX=qwen25-1p5b
+make deploy MODEL=Qwen/Qwen2.5-Coder-7B-Instruct SUFFIX=coder
+make deploy MODEL=openai/gpt-oss-20b SUFFIX=gptoss EXTRA="--reasoning-parser openai_gptoss"
+make bench-model URL=https://<url> MODEL=Qwen/Qwen2.5-1.5B-Instruct
+make bench-model URL=https://<url> MODEL=Qwen/Qwen2.5-Coder-7B-Instruct
+make bench-model URL=https://<url> MODEL=openai/gpt-oss-20b EFFORT=low MAX_TOKENS=1024
+make report
+```
+
+For the quantisation experiment, `NAME` overrides the label when the checkpoint is the same as the baseline:
+
+```bash
+make deploy MODEL=Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8 SUFFIX=int8
+make deploy MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ SUFFIX=int4
+make deploy MODEL=Qwen/Qwen2.5-7B-Instruct SUFFIX=fp8 EXTRA="--quantization fp8"
+make bench-model URL=https://<url> MODEL=Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8
+make bench-model URL=https://<url> MODEL=Qwen/Qwen2.5-7B-Instruct-AWQ
+make bench-model URL=https://<url> MODEL=Qwen/Qwen2.5-7B-Instruct NAME=Qwen2.5-7B-Instruct-fp8
 make report
 ```
 

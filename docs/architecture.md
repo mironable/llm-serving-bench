@@ -2,9 +2,11 @@
 
 This document explains what the benchmark measures, where in the serving pipeline each number comes from, and why vLLM and SGLang are the two servers worth comparing. The results table lives in the [README](../README.md).
 
-## What a request goes through
+## The path of one request
 
-Both servers follow the same high-level pipeline. The differences that matter for latency are inside the scheduler and the KV cache, which is why the benchmark holds everything else constant: same model, same GPU, same context length, same prompts, same client.
+A request to a conventional model is one forward pass: input in, prediction out, one latency. An LLM request is one forward pass over the prompt and then one forward pass per generated token, streamed back as it goes. That is why there are two latencies instead of one, and why the server has to schedule many requests through the same GPU at once rather than one at a time.
+
+Both servers follow the same high-level pipeline, from the client's POST to the last streamed token. The differences that matter for latency are inside the scheduler and the KV cache, which is why the benchmark holds everything else constant: same model, same GPU, same context length, same prompts, same client.
 
 ```mermaid
 sequenceDiagram
@@ -89,7 +91,7 @@ Each server runs in its own Modal app on an identical GPU and reads the same cac
 
 ## Why vLLM and SGLang
 
-Both are production inference engines built on the two ideas that made LLM serving efficient:
+Both are production inference engines: the library that loads the weights onto the GPU and runs requests through them. The choice matters more than the runtime choice for a conventional model, because the engine owns the scheduling that decides how many users one GPU serves. Both are built on the two ideas that made LLM serving efficient:
 
 - **Continuous batching.** New requests join the running batch at any decode step instead of waiting for the batch to drain. This is what lets throughput scale with concurrency.
 - **Paged KV cache.** The attention cache is stored in fixed-size blocks allocated on demand, so memory is not reserved for the maximum context length up front. This is what sets how many sequences fit on one GPU.
@@ -114,4 +116,5 @@ Each point cites rows of the results table in the [README](../README.md). The sw
 - **Sizing a single A10G for a 7B model.** Plan for about 64 concurrent streams on vLLM before TTFT degrades, and about 45 on SGLang at defaults. Above the knee, vLLM degrades through prefill contention with zero queueing and SGLang degrades through queueing, which is the better failure mode to alarm on since queue depth is an explicit gauge.
 - **Many short chats with a shared system prompt.** A draw on TTFT, vLLM on throughput. With a 1500-token shared system prompt both caches absorbed the prefill, TTFT stayed flat against the short workload on both servers, and vLLM still produced 15 to 40 percent more tokens per second at 64 and 128. SGLang degraded more gracefully at 128 (7.2 s median TTFT against its 10.6 s on short prompts, and lower ITL than vLLM). Count the system prompt against every concurrent user when sizing: it raised ITL at 64 by about 25 percent on both servers because decode attends over the cached tokens too.
 - **Reasoning models.** Treat thinking as a per-request effort knob and plan capacity on visible tokens. On Qwen3-8B with vLLM, thinking tokens decode at the same ITL as answer tokens, a 512-token budget put the first visible token at 18 to 20 s at low concurrency against 0.4 to 0.9 s with thinking off, and unbounded thinking cut visible throughput at 128 streams from 1034 to 118 tok/s while 6 to 14 percent of requests ran out of `max_tokens` before answering. Alarm on time to first visible token, not TTFT, which stays under a second while the model thinks.
+- **Model size and weight format.** Decide these before the engine. On one A10G the 1.5B served 128 streams at 10 ms ITL with no knee, the 7B knees at 64, and int8 or fp8 weights halved the 7B's low-load ITL while leaving the knee throughput within 10 percent of bf16; int4 got 30 percent more. A mixture-of-experts model such as gpt-oss-20b decodes like a small model when idle and like its full size under load. Pair any of these with a quality eval, since the serving numbers say nothing about answers.
 - **JSON-constrained output.** Not measured. Both support it; SGLang treats it as a core path, vLLM via guided decoding backends. Needs its own sweep with a grammar.

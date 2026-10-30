@@ -73,7 +73,8 @@ def summarize_reasoning(df: pd.DataFrame) -> pd.DataFrame:
     df = _with_defaults(df)
     if "ttfvt_s" not in df.columns:
         return pd.DataFrame(columns=REASONING_COLUMNS)
-    df = df.loc[df["model"] != DEFAULT_MODEL]  # only models run with a thinking switch
+    thinking_models = df.loc[df["reasoning"] != "off", "model"].unique().tolist()
+    df = df.loc[df["model"].isin(thinking_models)]  # a model's off row is its baseline
     rows = []
     for _, g in df.groupby(REASONING_KEY, sort=True):
         answered = g["ttfvt_s"].notna()

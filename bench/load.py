@@ -23,6 +23,7 @@ PROMPTS = [
 
 WORKLOADS = ["short", "shared-prefix"]
 REASONING_MODES = ["off", "on", "budget"]
+REASONING_EFFORTS = ["low", "medium", "high"]
 
 _RULES = [
     "Answer in the learner's target language first, then give a one-line gloss in English.",
@@ -63,7 +64,11 @@ def messages_for(workload: str, i: int) -> list[dict[str, str]]:
 
 
 def request_body(
-    messages: list[dict[str, str]], max_tokens: int, reasoning: str | None, budget: int
+    messages: list[dict[str, str]],
+    max_tokens: int,
+    reasoning: str | None,
+    budget: int,
+    effort: str | None = None,
 ) -> dict[str, Any]:
     """OpenAI chat body; reasoning modes map to vLLM's Qwen3 chat-template kwargs and budget."""
     body: dict[str, Any] = {
@@ -78,6 +83,8 @@ def request_body(
         body["chat_template_kwargs"] = {"enable_thinking": reasoning != "off"}
     if reasoning == "budget":
         body["thinking_token_budget"] = budget
+    if effort is not None:
+        body["reasoning_effort"] = effort  # gpt-oss: low, medium or high via the chat template
     return body
 
 
@@ -139,7 +146,11 @@ async def run_level(
     async def guarded(i: int) -> RequestStats | None:
         async with sem:
             body = request_body(
-                messages_for(args.workload, i), args.max_tokens, args.reasoning, args.budget
+                messages_for(args.workload, i),
+                args.max_tokens,
+                args.reasoning,
+                args.budget,
+                args.reasoning_effort,
             )
             try:
                 return await stream_one(client, body)
@@ -159,7 +170,7 @@ async def run_level(
             "server": args.server_name,
             "model": args.model_name,
             "workload": args.workload,
-            "reasoning": args.reasoning or "off",
+            "reasoning": args.reasoning or args.reasoning_effort or "off",
             "concurrency": concurrency,
             "request_idx": i,
             "ttft_s": s.ttft_s,
@@ -181,7 +192,9 @@ async def run_level(
 async def main_async(args: argparse.Namespace) -> None:
     rows: list[dict[str, Any]] = []
     async with httpx.AsyncClient(base_url=args.base_url, timeout=args.timeout) as client:
-        warm = request_body(messages_for(args.workload, 0), 16, args.reasoning, args.budget)
+        warm = request_body(
+            messages_for(args.workload, 0), 16, args.reasoning, args.budget, args.reasoning_effort
+        )
         try:
             await stream_one(client, warm)
         except (httpx.HTTPError, ValueError) as exc:
@@ -198,7 +211,8 @@ async def main_async(args: argparse.Namespace) -> None:
             tput = df["tokens"].sum() / df["level_wall_s"].iloc[0]
             answered = df["ttfvt_s"].notna().mean() * 100
             print(
-                f"{args.server_name} {args.workload} reasoning={args.reasoning or 'off'} c={c:>3} "
+                f"{args.server_name} {args.workload} "
+                f"reasoning={args.reasoning or args.reasoning_effort or 'off'} c={c:>3} "
                 f"ttft_p50={df['ttft_s'].median() * 1000:.0f}ms "
                 f"ttfvt_p50={df['ttfvt_s'].median() * 1000:.0f}ms "
                 f"itl={df['itl_mean_s'].mean() * 1000:.1f}ms tput={tput:.0f} tok/s "
@@ -224,6 +238,12 @@ def main() -> None:
     )
     p.add_argument(
         "--budget", type=int, default=512, help="thinking token budget for --reasoning budget"
+    )
+    p.add_argument(
+        "--reasoning-effort",
+        choices=REASONING_EFFORTS,
+        default=None,
+        help="per-request effort for models that take one, such as gpt-oss",
     )
     p.add_argument(
         "--concurrency", type=lambda s: [int(x) for x in s.split(",")], default=[1, 4, 16, 64, 128]
